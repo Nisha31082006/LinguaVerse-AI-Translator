@@ -1,0 +1,355 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model User {
+  id              String    @id @default(uuid())
+  fullName        String
+  username        String    @unique
+  email           String    @unique
+  passwordHash    String
+  avatar          String?
+  country         String?
+  preferredLanguage String? @default("en")
+  role            UserRole  @default(USER)
+  status          UserStatus @default(PENDING)
+  emailVerified   Boolean   @default(false)
+  twoFactorEnabled Boolean  @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  translations    TranslationHistory[]
+  sessions        UserSession[]
+  favorites       FavoriteTranslation[]
+  notifications   Notification[]
+  ocrHistory      OcrHistory[]
+  voiceHistory    VoiceHistory[]
+  documentTranslations DocumentTranslation[]
+  subscription    UserSubscription?
+  quizResults     QuizResult[]
+  learningProgress LearningProgress?
+  flashcardProgress FlashcardProgress[]
+  glossaryTerms   GlossaryTerm[]
+  apiKeys         ApiKey[]
+
+  @@index([email])
+  @@index([username])
+}
+
+model UserSession {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String   @unique @db.VarChar(512)
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  revokedAt    DateTime?
+
+  @@index([userId])
+}
+
+model Language {
+  id           String   @id @default(uuid())
+  languageName String
+  languageCode String   @unique
+  nativeName   String
+  direction    String   @default("LTR")
+  activeStatus Boolean  @default(true)
+
+  @@index([languageCode])
+}
+
+enum TranslationMode {
+  GENERAL
+  BUSINESS
+  MEDICAL
+  LEGAL
+  TECHNICAL
+}
+
+model TranslationHistory {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  sourceLanguage   String
+  targetLanguage   String
+  sourceText       String   @db.Text
+  translatedText   String   @db.Text
+  mode             TranslationMode @default(GENERAL)
+  aiProvider       String
+  confidenceScore  Float?
+  processingTimeMs Int?
+  createdAt        DateTime @default(now())
+
+  favoritedBy      FavoriteTranslation[]
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model FavoriteTranslation {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  translationId String
+  translation   TranslationHistory @relation(fields: [translationId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, translationId])
+  @@index([userId])
+}
+
+enum NotificationType {
+  TRANSLATION_COMPLETED
+  SECURITY_ALERT
+  SYSTEM_ANNOUNCEMENT
+  ACCOUNT
+}
+
+model Notification {
+  id        String            @id @default(uuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String            @db.Text
+  type      NotificationType  @default(SYSTEM_ANNOUNCEMENT)
+  isRead    Boolean           @default(false)
+  createdAt DateTime          @default(now())
+
+  @@index([userId])
+  @@index([userId, isRead])
+}
+
+model OcrHistory {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  originalFileName String
+  extractedText    String   @db.Text
+  translatedText   String?  @db.Text
+  targetLanguage   String?
+  confidenceScore  Float?
+  processingTimeMs Int?
+  createdAt        DateTime @default(now())
+
+  @@index([userId])
+}
+
+model VoiceHistory {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  originalFileName String
+  transcript       String   @db.Text
+  translatedText   String?  @db.Text
+  targetLanguage   String?
+  aiProvider       String
+  processingTimeMs Int?
+  createdAt        DateTime @default(now())
+
+  @@index([userId])
+}
+
+model DocumentTranslation {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  originalFileName String
+  fileType         String
+  sourceText       String   @db.Text
+  translatedText   String   @db.Text
+  targetLanguage   String
+  downloadFileName String
+  aiProvider       String
+  processingTimeMs Int?
+  createdAt        DateTime @default(now())
+
+  @@index([userId])
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+model Plan {
+  id                String   @id @default(uuid())
+  tier              PlanTier @unique
+  name              String
+  priceCents        Int
+  currency          String   @default("usd")
+  interval          String   @default("month") // "month" | "year"
+  stripePriceId     String?  // null for FREE (no checkout needed)
+  dailyTranslationLimit Int? // null = unlimited
+  features          String   @db.Text // JSON-encoded string array
+
+  subscriptions     UserSubscription[]
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+}
+
+model UserSubscription {
+  id                   String             @id @default(uuid())
+  userId               String             @unique
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId               String
+  plan                 Plan               @relation(fields: [planId], references: [id])
+  stripeCustomerId     String?
+  stripeSubscriptionId String?            @unique
+  status               SubscriptionStatus @default(ACTIVE)
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([userId])
+}
+
+enum DifficultyLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+model Vocabulary {
+  id            String          @id @default(uuid())
+  word          String
+  languageCode  String
+  meaning       String          @db.Text
+  example       String?         @db.Text
+  pronunciation String?
+  difficulty    DifficultyLevel @default(BEGINNER)
+  createdAt     DateTime        @default(now())
+
+  flashcards    Flashcard[]
+
+  @@index([languageCode])
+}
+
+model Flashcard {
+  id           String     @id @default(uuid())
+  vocabularyId String
+  vocabulary   Vocabulary @relation(fields: [vocabularyId], references: [id], onDelete: Cascade)
+  front        String
+  back         String
+  category     String?
+  createdAt    DateTime   @default(now())
+
+  progress     FlashcardProgress[]
+
+  @@index([vocabularyId])
+}
+
+model FlashcardProgress {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flashcardId String
+  flashcard   Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
+  timesReviewed Int     @default(0)
+  lastResult  String?   // "correct" | "incorrect"
+  reviewedAt  DateTime  @default(now())
+
+  @@unique([userId, flashcardId])
+  @@index([userId])
+}
+
+model Quiz {
+  id            String   @id @default(uuid())
+  languageCode  String
+  question      String   @db.Text
+  options       String   @db.Text // JSON-encoded string array
+  correctAnswer String
+  explanation   String?  @db.Text
+  difficulty    DifficultyLevel @default(BEGINNER)
+  createdAt     DateTime @default(now())
+
+  results       QuizResult[]
+
+  @@index([languageCode])
+}
+
+model QuizResult {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quizId       String
+  quiz         Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  selectedAnswer String
+  isCorrect    Boolean
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model LearningProgress {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  xpPoints         Int      @default(0)
+  currentStreak    Int      @default(0)
+  longestStreak    Int      @default(0)
+  lastActivityDate DateTime?
+  wordsLearned     Int      @default(0)
+  quizzesCompleted Int      @default(0)
+  updatedAt        DateTime @updatedAt
+}
+
+/// A user's preferred translation for a specific term — e.g. always
+/// render "CPU" as "செயலி" rather than a literal translation. Injected
+/// into the AI prompt at translation time (see translate.service.ts).
+model GlossaryTerm {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceTerm     String
+  preferredTerm  String
+  targetLanguage String
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  @@unique([userId, sourceTerm, targetLanguage])
+  @@index([userId])
+}
+
+/// Public API access. The raw key is shown to the user exactly once at
+/// creation time — only its bcrypt hash and a short display prefix
+/// (e.g. "lv_a1b2c3...") are stored, same principle as a password.
+model ApiKey {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  keyPrefix  String    // first 12 chars of the raw key, shown in the UI, used to narrow lookup
+  keyHash    String    // bcrypt hash of the full raw key
+  lastUsedAt DateTime?
+  revoked    Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([keyPrefix])
+}
